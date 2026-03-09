@@ -161,6 +161,28 @@ select {
     color: #fff;
 }
 
+.btn-ai {
+    background: linear-gradient(135deg, #6e8efb, #a777e3);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(110, 142, 251, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-ai:hover {
+    background: linear-gradient(135deg, #5a7dfa, #9666e0);
+    box-shadow: 0 6px 20px rgba(110, 142, 251, 0.4);
+}
+
+.btn-ai .icon {
+    margin-right: 5px;
+    font-size: 1.1rem;
+}
+
+.hidden {
+    display: none !important;
+}
+
 /* Grid & Cards */
 .rich-menu-grid {
     display: grid;

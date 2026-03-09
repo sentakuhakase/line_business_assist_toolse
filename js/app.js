@@ -1,10 +1,28 @@
 $(function() {
+    // すべてのalert内容をConsoleにも出力するように拡張
+    const originalAlert = window.alert;
+    window.alert = function(msg) {
+        console.group("--- Alert Message ---");
+        console.log(msg);
+        // JSON文字列っぽい場合はパースしてオブジェクトとしても表示
+        if (typeof msg === 'string' && (msg.startsWith('{') || msg.startsWith('['))) {
+            try {
+                const obj = JSON.parse(msg.replace(/^生成失敗: /, ''));
+                console.log("Parsed Object:", obj);
+            } catch (e) { /* ignore */ }
+        }
+        console.groupEnd();
+        return originalAlert(msg);
+    };
+
     const STORAGE_KEY = 'line_rich_menu_token';
+    const GEMINI_KEY_STORAGE = 'gemini_api_key';
+    const GEMINI_MODEL_STORAGE = 'gemini_selected_model';
     const API_URL = 'api.php';
     let currentMenus = []; 
     let activeRequests = 0; 
     let previewImageData = null; 
-    let defaultRichMenuId = null; // 現在のデフォルトID
+    let defaultRichMenuId = null; 
 
     const RESOLUTIONS = {
         large: { Large: { width: 2500, height: 1686 }, Medium: { width: 1200, height: 810 }, Small: { width: 800, height: 540 } },
@@ -34,6 +52,8 @@ $(function() {
     const $loading = $('#loading');
     const $richMenuList = $('#rich-menu-list');
     const $tokenInput = $('#channel-token');
+    const $geminiKeyInput = $('#gemini-api-key');
+    const $modelSelect = $('#gemini-model-select');
     const $inputName = $('#input-name');
     const $inputChatbar = $('#input-chatbar');
     const $btnSubmit = $('#btn-create-submit');
@@ -45,8 +65,32 @@ $(function() {
     function showLoader() { activeRequests++; $loading.show(); }
     function hideLoader() { activeRequests--; if (activeRequests <= 0) { activeRequests = 0; $loading.hide(); } }
 
-    const savedToken = localStorage.getItem(STORAGE_KEY);
-    if (savedToken) { $tokenInput.val(savedToken); updateStatus(true); fetchRichMenus(); }
+    function updateStatus() {
+        const lineToken = getToken();
+        const geminiKey = getGeminiKey();
+
+        $('#status-line').text('LINE: ' + (lineToken ? 'Connected' : 'Disconnected'))
+            .css('color', lineToken ? '#06c755' : '#dc3545');
+        $('#status-gemini').text('Gemini: ' + (geminiKey ? 'Connected' : 'Disconnected'))
+            .css('color', geminiKey ? '#06c755' : '#dc3545');
+    }
+
+    function getToken() { return localStorage.getItem(STORAGE_KEY); }
+    function getGeminiKey() { return localStorage.getItem(GEMINI_KEY_STORAGE); }
+
+    // 初期化
+    const savedToken = getToken();
+    if (savedToken) { $tokenInput.val(savedToken); fetchRichMenus(); }
+
+    const savedGeminiKey = getGeminiKey();
+    if (savedGeminiKey) { $geminiKeyInput.val(savedGeminiKey); }
+
+    const savedModel = localStorage.getItem(GEMINI_MODEL_STORAGE);
+    if (savedModel) {
+        $modelSelect.append(new Option(savedModel, savedModel, true, true));
+    }
+
+    updateStatus();
 
     function resetCreateForm() {
         $inputName.val(''); $inputChatbar.val(''); $inputImagePreview.val(''); $selectedTemplateId.val('');
@@ -65,16 +109,11 @@ $(function() {
 
     $inputName.on('input', validateForm); $inputChatbar.on('input', validateForm); $(document).on('input', '.required-field', validateForm);
 
-    function updateStatus(isConnected) { $('#status-label').text(isConnected ? 'Connected' : 'Disconnected').css('color', isConnected ? '#06c755' : '#dc3545'); }
-    function getToken() { return localStorage.getItem(STORAGE_KEY); }
-
     $('#fetch-menus').on('click', fetchRichMenus);
 
     function fetchRichMenus() {
         const token = getToken(); if (!token) return;
         showLoader();
-        
-        // デフォルトIDを取得してからリストを取得
         $.ajax({ url: API_URL + '?action=get_default', method: 'GET', headers: { 'Authorization': 'Bearer ' + token } })
         .done(res => { defaultRichMenuId = res.richMenuId || null; })
         .always(() => {
@@ -88,7 +127,6 @@ $(function() {
     function renderRichMenuCard(menu) {
         const isDefault = (menu.richMenuId === defaultRichMenuId);
         const defaultBadge = isDefault ? `<div style="position:absolute; top:10px; right:10px; background:#06c755; color:#fff; padding:4px 10px; border-radius:20px; font-size:0.7rem; font-weight:bold; z-index:10; box-shadow:0 2px 4px rgba(0,0,0,0.2);">★ デフォルト</div>` : '';
-        
         const card = $(`
             <div class="rich-menu-card" style="position:relative;">
                 ${defaultBadge}
@@ -115,7 +153,6 @@ $(function() {
         .fail(() => $(`#img-${richMenuId}`).html('<p style="font-size: 0.7rem; color: #ccc;">No Image</p>'));
     }
 
-    // デフォルト設定処理
     $(document).on('click', '.btn-set-default', function() {
         const id = $(this).data('id');
         if (confirm('このリッチメニューをアカウント全体のデフォルトに設定しますか？')) {
@@ -126,10 +163,7 @@ $(function() {
         }
     });
 
-    // 特定ユーザー設定 (開発中)
-    $(document).on('click', '.btn-set-user', function() {
-        alert('「特定ユーザーのリッチメニュー設定」機能は現在開発中です。');
-    });
+    $(document).on('click', '.btn-set-user', function() { alert('「特定ユーザーのリッチメニュー設定」機能は現在開発中です。'); });
 
     function renderTemplates() {
         const size = $('#size-select').val(); const resLabel = $('#res-select').val(); 
@@ -192,6 +226,73 @@ $(function() {
     $('#size-select, #res-select').on('change', renderTemplates);
     $('#open-create-modal').on('click', () => { resetCreateForm(); $('#create-modal').fadeIn(); renderTemplates(); });
 
+    // AI作成モーダル制御
+    const $aiCreateModal = $('#ai-create-modal');
+    const $aiAreaContainer = $('#ai-area-labels-container');
+    const $aiStatus = $('#ai-status');
+    const $btnGenerateAi = $('#btn-generate-ai');
+
+    $('#btn-open-ai-modal').on('click', function() {
+        const size = $('#size-select').val();
+        const templateId = $selectedTemplateId.val();
+        if (!templateId) { alert('先にレイアウトテンプレートを選択してください。'); return; }
+        const template = TEMPLATES[size].find(t => t.id === templateId);
+        $aiAreaContainer.empty();
+        template.areas.forEach(area => {
+            const $group = $(`<div class="form-group" style="margin-bottom: 12px; padding: 10px; background: #fdfdfd; border: 1px solid #eee; border-radius: 6px;"><label style="font-size: 0.8rem; display: flex; align-items: center; gap: 8px;"><span style="background: #a777e3; color: #fff; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.7rem;">${area.label}</span>エリア ${area.label} の文字</label><input type="text" class="ai-area-input" data-label="${area.label}" placeholder="例: メニュー表示" style="padding: 8px; font-size: 0.85rem;"></div>`);
+            $aiAreaContainer.append($group);
+        });
+        $aiStatus.addClass('hidden'); $btnGenerateAi.prop('disabled', false); $aiCreateModal.fadeIn();
+    });
+
+    $btnGenerateAi.on('click', function() {
+        if (!getGeminiKey()) { alert('接続設定でGemini APIキーを設定してください。'); return; }
+        const concept = $('#ai-concept').val().trim() || '公式アカウントのリッチメニュー';
+        const colorBase = $('#ai-color-base').val();
+        const colorText = $('#ai-color-text').val();
+        const colorButton = $('#ai-color-button').val();
+        const is3d = $('#ai-style-3d').is(':checked');
+        const isModern = $('#ai-style-modern').is(':checked');
+        const selectedModel = $modelSelect.val();
+
+        let areaPrompts = [];
+        $('.ai-area-input').each(function() {
+            const label = $(this).data('label'); const text = $(this).val().trim();
+            if (text) areaPrompts.push(`・エリア ${label}: ${text}`);
+        });
+        if (areaPrompts.length === 0) { alert('少なくとも1つのボタンにテキストを入力してください。'); return; }
+
+        let fullPrompt = `添付のレイアウトガイド画像を参考に、以下の要件でLINE公式アカウントのリッチメニュー画像を作成してください。\n\n### デザインコンセプト\n${concept}\n\n### 厳守事項\n1. アスペクト比は添付のレイアウトガイド画像と同じにすること。\n2. ガイド内の「A」「B」等の文字や解像度数値は一切含めないこと。\n3. ボタン境界を明確にすること。\n\n### ボタンテキスト\n${areaPrompts.join('\n')}\n\n### 配色\n・全体: ${colorBase}\n・文字: ${colorText}\n・ボタン背景: ${colorButton}\n\n### スタイル\n${is3d ? '・立体的なイメージ、イラスト装飾\n' : ''}${isModern ? '・洗練されたモダンデザイン\n' : ''}`;
+
+        $aiStatus.removeClass('hidden'); $btnGenerateAi.prop('disabled', true);
+        const size = $('#size-select').val(); const resLabel = $('#res-select').val(); const templateId = $selectedTemplateId.val();
+        const folderName = size.charAt(0).toUpperCase() + size.slice(1);
+        let suffix = (resLabel === 'Medium' ? 'm' : (resLabel === 'Small' ? 's' : ''));
+        const guideImagePath = `img/richi_menu_official_temp/${folderName}/${resLabel}/richmenu-template-guide${suffix}-${templateId}.png`;
+// API連携
+$.ajax({
+    url: API_URL + '?action=ai_generate', method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + getToken(), 'X-Gemini-API-Key': getGeminiKey() },
+    data: JSON.stringify({ prompt: fullPrompt, guideImage: guideImagePath, model: selectedModel }), contentType: 'application/json'
+})
+.done(res => {
+    console.log('AI Generate Response:', res); // Consoleに詳細を出力
+    if (res && res.image) {
+        $imgPreview.attr('src', res.image).show(); $('#preview-placeholder').hide();
+        fetch(res.image).then(r => r.blob()).then(blob => { previewImageData = new File([blob], "ai_generated.png", { type: "image/png" }); validateForm(); });
+        $aiCreateModal.fadeOut(); alert('画像を生成しました！');
+    } else { 
+        alert('生成失敗: ' + (res.ai_response || res.error || '不明なエラー')); 
+    }
+})
+.fail(xhr => {
+    console.error('AI Generate AJAX Fail:', xhr); // 通信失敗時の詳細をConsoleに出力
+    alert('生成失敗: ' + xhr.responseText);
+})
+.always(() => { $aiStatus.addClass('hidden'); $btnGenerateAi.prop('disabled', false); });
+
+    });
+
     $('#create-form').on('submit', function(e) {
         e.preventDefault(); const token = getToken(); const sizeType = $('#size-select').val(); const resLabel = $('#res-select').val();
         const template = TEMPLATES[sizeType].find(t => t.id === $selectedTemplateId.val());
@@ -218,10 +319,74 @@ $(function() {
 
     $(document).on('click', '.btn-delete', function() { if (confirm('削除しますか？')) { showLoader(); $.ajax({ url: API_URL + '?action=delete&richMenuId=' + $(this).data('id'), method: 'GET', headers: { 'Authorization': 'Bearer ' + getToken() } }).done(() => fetchRichMenus()).always(hideLoader); } });
     $('.nav-item').on('click', function() { $('.nav-item').removeClass('active'); $(this).addClass('active'); $('.section').removeClass('active'); $('#' + $(this).data('section')).addClass('active'); });
-    $('#save-token').on('click', function() { const t = $tokenInput.val().trim(); if (t) { localStorage.setItem(STORAGE_KEY, t); updateStatus(true); alert('保存しました'); fetchRichMenus(); } });
-    $('#clear-token').on('click', function() { if (confirm('削除？')) { localStorage.removeItem(STORAGE_KEY); $tokenInput.val(''); updateStatus(false); $richMenuList.empty(); } });
+
+    $('#save-token').on('click', function() { 
+        const t = $tokenInput.val().trim(); 
+        const gk = $geminiKeyInput.val().trim();
+        const m = $modelSelect.val();
+        if (t) localStorage.setItem(STORAGE_KEY, t);
+        if (gk) localStorage.setItem(GEMINI_KEY_STORAGE, gk);
+        if (m) localStorage.setItem(GEMINI_MODEL_STORAGE, m);
+        updateStatus(); 
+        alert('設定を保存しました'); 
+        if (t) fetchRichMenus();
+    });
+
+    // Geminiの利用可能モデルを確認
+    $('#check-gemini-models').on('click', function() {
+        const gk = getGeminiKey() || $geminiKeyInput.val().trim();
+        if (!gk) { alert('先にGemini APIキーを入力してください。'); return; }
+
+        showLoader();
+        $.ajax({
+            url: API_URL + '?action=list_models',
+            method: 'GET',
+            headers: { 
+                'Authorization': 'Bearer ' + (getToken() || 'dummy'),
+                'X-Gemini-API-Key': gk 
+            }
+        })
+        .done(res => {
+            console.log('--- Available Gemini Models ---', res);
+            if (res && res.models) {
+                // プルダウンをクリアして追加
+                const currentVal = $modelSelect.val();
+                $modelSelect.empty();
+                res.models.forEach(m => {
+                    const name = m.name.replace('models/', '');
+                    // 画像生成（generateContentでの画像出力）が期待できるモデルや、2.5系を優先的に上の方へ
+                    const isRecommended = name.includes('2.5') || name.includes('image') || name.includes('flash');
+                    const option = new Option(name + (isRecommended ? ' ✨' : ''), name);
+                    $modelSelect.append(option);
+                });
+                if (currentVal) $modelSelect.val(currentVal);
+                alert('利用可能なモデルをリストに反映しました（' + res.models.length + '件）\n使用するモデルを選択して保存してください。');
+            } else {
+                alert('モデル一覧を取得できませんでした。Consoleを確認してください。');
+            }
+        })
+        .fail(xhr => {
+            console.error('List Models Fail:', xhr);
+            alert('取得失敗: ' + xhr.responseText);
+        })
+        .always(hideLoader);
+    });
+
+    $('#clear-token').on('click', function() {
+        if (confirm('設定をすべてリセットしますか？')) {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(GEMINI_KEY_STORAGE);
+            localStorage.removeItem(GEMINI_MODEL_STORAGE);
+            $tokenInput.val(''); $geminiKeyInput.val('');
+            $modelSelect.empty().append('<option value="gemini-2.5-flash">gemini-2.5-flash (Default)</option>');
+            updateStatus();
+            $richMenuList.empty();
+        }
+    });
+
     $(document).on('click', '.btn-view-json', function() { const m = currentMenus.find(x => x.richMenuId === $(this).data('id')); if (m) { $('#json-display').text(JSON.stringify(m, null, 4)); $('#json-modal').fadeIn(); } });
     $('#copy-json').on('click', () => navigator.clipboard.writeText($('#json-display').text()).then(() => alert('JSONコピー済')));
     $('.close-modal').on('click', () => { $('.modal').fadeOut(); if ($('#create-modal').is(':visible')) resetCreateForm(); });
     $(window).on('click', (e) => { if ($(e.target).hasClass('modal')) { $('.modal').fadeOut(); resetCreateForm(); } });
 });
+
