@@ -38,7 +38,9 @@ $(function() {
             { id: '04', name: '3 Buttons (L+2S)', areas: [{ x: 0, y: 0, w: 1666, h: 1686, label: 'A' }, { x: 1666, y: 0, w: 834, h: 843, label: 'B' }, { x: 1666, y: 843, w: 834, h: 843, label: 'C' }] },
             { id: '05', name: '2 Buttons (V)', areas: [{ x: 0, y: 0, w: 2500, h: 843, label: 'A' }, { x: 0, y: 843, w: 2500, h: 843, label: 'B' }] },
             { id: '06', name: '2 Buttons (H)', areas: [{ x: 0, y: 0, w: 1250, h: 1686, label: 'A' }, { x: 1250, y: 0, w: 1250, h: 1686, label: 'B' }] },
-            { id: '07', name: '1 Button', areas: [{ x: 0, y: 0, w: 2500, h: 1686, label: 'A' }] }
+            { id: '07', name: '1 Button', areas: [{ x: 0, y: 0, w: 2500, h: 1686, label: 'A' }] },
+            { id: '08', name: '5 Buttons (Top2M + Bottom3S)', areas: [{ x: 0, y: 0, w: 1250, h: 843, label: 'A' }, { x: 1250, y: 0, w: 1250, h: 843, label: 'B' }, { x: 0, y: 843, w: 833, h: 843, label: 'C' }, { x: 833, y: 843, w: 834, h: 843, label: 'D' }, { x: 1667, y: 843, w: 833, h: 843, label: 'E' }] }
+
         ],
         compact: [
             { id: '01', name: '3 Buttons', areas: [{ x: 0, y: 0, w: 833, h: 843, label: 'A' }, { x: 833, y: 0, w: 834, h: 843, label: 'B' }, { x: 1667, y: 0, w: 833, h: 843, label: 'C' }] },
